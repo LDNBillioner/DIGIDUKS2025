@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Cari Riwayat Siswa - DIGIDUKS</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        /* styling khusus untuk autosuggest */
+        .suggestions {
+            position: absolute;
+            z-index: 2000;
+            width: 100%;
+            max-height: 260px;
+            overflow-y: auto;
+            box-shadow: 0 6px 16px rgba(0,0,0,0.12);
+        }
+        .suggestion-item {
+            cursor: pointer;
+            padding: .5rem .75rem;
+        }
+        .suggestion-item:hover, .suggestion-item.active {
+            background-color: #e9f5ff;
+        }
+        /* space inside card to not overlap suggestions */
+        .search-wrapper { position: relative; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary shadow-sm">
+        <div class="container">
+            <a class="navbar-brand" href="index.html">DIGIDUKS</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item"><a class="nav-link" href="index.html">Dashboard</a></li>
+                    <li class="nav-item"><a class="nav-link active" href="cari.html">Cari Siswa</a></li>
+                    <li class="nav-item"><a class="nav-link" href="obat.html">Obat</a></li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <main class="container mt-4 mb-5">
+        <div class="row justify-content-center">
+            <div class="col-md-9">
+                <div class="card shadow-sm">
+                    <div class="card-header bg-primary text-white">
+                        <h4 class="mb-0">Cek Riwayat Kunjungan Siswa</h4>
+                    </div>
+                    <div class="card-body">
+                        <div class="search-wrapper mb-3">
+                            <div class="input-group">
+                                <input id="namaSiswa" type="text" class="form-control" placeholder="Ketik nama siswa..." autocomplete="off">
+                                <button id="btnCari" class="btn btn-primary">Cari</button>
+                            </div>
+                            <!-- suggestions container -->
+                            <div id="suggestions" class="list-group suggestions" style="display:none;"></div>
+                        </div>
+
+                        <div id="hasilPencarian" class="mt-2 p-3 border rounded bg-light" style="display:none;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+<script>
+/*
+  File: cari.html (update)
+  - Keluhan diambil dari satu kolom: "AMNESA & HASIL PX" (header dicocokkan case-insensitive & normalized)
+  - Kelas diambil dari kolom: "STATUS"
+  - Jika keluhan kosong => tampil '-'
+  - Autosuggest model B, max 5
+*/
+
+const urlRiwayatUKS = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQntlMIiLG9TMkWCtS_NVIR0aH87VSAY3dA5ydVS2cc3mnwwYKMTVtY6I8vE6AXy6RO6iAwzWDq7qpN/pub?gid=2076057568&single=true&output=csv';
+
+let dataRiwayat = []; // array of objects
+let headers = [];     // original headers (as in CSV)
+const MAX_SUGGEST = 5;
+
+const inputEl = document.getElementById('namaSiswa');
+const btnCari = document.getElementById('btnCari');
+const hasilDiv = document.getElementById('hasilPencarian');
+const suggestionsEl = document.getElementById('suggestions');
+
+document.addEventListener('DOMContentLoaded', init);
+
+async function init() {
+    attachListeners();
+    await loadCSV();
+}
+
+function attachListeners() {
+    btnCari.addEventListener('click', () => performSearch(inputEl.value.trim()));
+    inputEl.addEventListener('input', onInput);
+    inputEl.addEventListener('keydown', onKeyDown);
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.search-wrapper')) hideSuggestions();
+    });
+}
+
+/* ---------- CSV load & parse ---------- */
+
+async function loadCSV() {
+    try {
+        const resp = await fetch(urlRiwayatUKS);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const text = await resp.text();
+        const rows = parseCSV(text);
+        if (rows.length === 0) {
+            console.warn('CSV kosong');
+            return;
+        }
+        headers = rows[0].map(h => (h || '').trim());
+        dataRiwayat = rows.slice(1).map(r => {
+            const obj = {};
+            headers.forEach((h, i) => obj[h] = (r[i] !== undefined) ? r[i] : '');
+            return obj;
+        });
+        console.log(`Data dimuat: ${dataRiwayat.length} baris. Headers:`, headers);
+    } catch (err) {
+        console.error('Gagal memuat CSV:', err);
+        showMessage('Gagal memuat database siswa. Periksa koneksi atau izin file Google Sheets.', 'danger');
+    }
+}
+
+/**
+ * Parser CSV sederhana namun menangani kutipan ganda dan koma di dalam field.
+ * Mengembalikan array of arrays.
+ */
+function parseCSV(text) {
+    const rows = [];
+    let i = 0, len = text.length;
+    let row = [], cell = '', inQuotes = false;
+
+    while (i < len) {
+        const ch = text[i];
+        if (inQuotes) {
+            if (ch === '"') {
+                if (i + 1 < len && text[i + 1] === '"') {
+                    cell += '"';
+                    i += 2;
+                } else {
+                    inQuotes = false;
+                    i++;
+                }
+            } else {
+                cell += ch;
+                i++;
+            }
+        } else {
+            if (ch === '"') {
+                inQuotes = true;
+                i++;
+            } else if (ch === ',') {
+                row.push(cell);
+                cell = '';
+                i++;
+            } else if (ch === '\r') {
+                i++;
+            } else if (ch === '\n') {
+                row.push(cell);
+                rows.push(row);
+                row = [];
+                cell = '';
+                i++;
+            } else {
+                cell += ch;
+                i++;
+            }
+        }
+    }
+    // last cell
+    if (inQuotes || cell !== '' || row.length > 0) {
+        row.push(cell);
+        rows.push(row);
+    }
+    // remove possible empty final row
+    if (rows.length > 0 && rows[rows.length - 1].length === 1 && rows[rows.length -1][0] === '') {
+        rows.pop();
+    }
+    return rows;
+}
+
+/* ---------- Header normalization helper ---------- */
+
+function normalizeHeader(h) {
+    if (!h) return '';
+    // lowercase and remove non-alphanumeric characters
+    return h.toString().toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+/**
+ * Find actual header name from CSV headers that matches any of candidates (case-insensitive, normalize).
+ * Returns the original header string (exact as in CSV) or null.
+ */
+function findHeaderKeyByCandidates(candidates = []) {
+    if (!headers || headers.length === 0) return null;
+    const normToOriginal = {};
+    headers.forEach(h => {
+        normToOriginal[normalizeHeader(h)] = h;
+    });
+    for (const cand of candidates) {
+        const norm = normalizeHeader(cand);
+        if (normToOriginal[norm]) return normToOriginal[norm];
+    }
+    // fallback: try to match partial names (e.g., header contains 'amnesa' or 'hasilpx')
+    for (const h of headers) {
+        const nh = normalizeHeader(h);
+        for (const cand of candidates) {
+            const nc = normalizeHeader(cand);
+            if (nh.includes(nc) || nc.includes(nh)) return h;
+        }
+    }
+    return null;
+}
+
+/* ---------- Autosuggest (model B) ---------- */
+
+let currentActiveIndex = -1;
+let currentSuggestions = [];
+
+function onInput(e) {
+    const query = e.target.value.trim().toLowerCase();
+    if (!query) { hideSuggestions(); return; }
+    const names = getUniqueNames();
+    const starts = [], contains = [];
+    for (const n of names) {
+        const nl = n.toLowerCase();
+        if (nl.startsWith(query)) starts.push(n);
+        else if (nl.includes(query)) contains.push(n);
+    }
+    const combined = starts.concat(contains);
+    const limited = combined.slice(0, MAX_SUGGEST);
+    showSuggestions(limited, query);
+}
+
+function getUniqueNames() {
+    const nameHeader = findHeaderKeyByCandidates(['NAMA','nama','name']);
+    if (!nameHeader) return [];
+    const seen = new Set();
+    const out = [];
+    for (const r of dataRiwayat) {
+        const val = (r[nameHeader] || '').trim();
+        if (!val) continue;
+        const key = val.toLowerCase();
+        if (!seen.has(key)) {
+            seen.add(key);
+            out.push(val);
+        }
+    }
+    return out;
+}
+
+function showSuggestions(list, query) {
+    currentSuggestions = list;
+    currentActiveIndex = -1;
+    suggestionsEl.innerHTML = '';
+    if (!list || list.length === 0) { hideSuggestions(); return; }
+    for (let i = 0; i < list.length; i++) {
+        const name = list[i];
+        const item = document.createElement('div');
+        item.className = 'list-group-item list-group-item-action suggestion-item';
+        item.setAttribute('data-index', i);
+        // highlight match
+        const idx = name.toLowerCase().indexOf(query.toLowerCase());
+        if (idx >= 0) {
+            const before = name.slice(0, idx);
+            const match = name.slice(idx, idx + query.length);
+            const after = name.slice(idx + query.length);
+            item.innerHTML = `${escapeHtml(before)}<strong>${escapeHtml(match)}</strong>${escapeHtml(after)}`;
+        } else {
+            item.textContent = name;
+        }
+        item.addEventListener('click', () => {
+            inputEl.value = name;
+            hideSuggestions();
+            performSearch(name);
+        });
+        suggestionsEl.appendChild(item);
+    }
+    suggestionsEl.style.display = 'block';
+}
+
+function hideSuggestions() {
+    suggestionsEl.style.display = 'none';
+    suggestionsEl.innerHTML = '';
+    currentSuggestions = [];
+    currentActiveIndex = -1;
+}
+
+function onKeyDown(e) {
+    if (suggestionsEl.style.display === 'none') return;
+    const items = suggestionsEl.querySelectorAll('.suggestion-item');
+    if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (currentActiveIndex < items.length - 1) {
+            currentActiveIndex++;
+            updateActiveSuggestion(items);
+        }
+    } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (currentActiveIndex > 0) {
+            currentActiveIndex--;
+            updateActiveSuggestion(items);
+        }
+    } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (currentActiveIndex >= 0 && items[currentActiveIndex]) {
+            items[currentActiveIndex].click();
+        } else {
+            performSearch(inputEl.value.trim());
+            hideSuggestions();
+        }
+    } else if (e.key === 'Escape') {
+        hideSuggestions();
+    }
+}
+
+function updateActiveSuggestion(items) {
+    items.forEach(it => it.classList.remove('active'));
+    if (currentActiveIndex >= 0 && items[currentActiveIndex]) {
+        items[currentActiveIndex].classList.add('active');
+        items[currentActiveIndex].scrollIntoView({ block: 'nearest' });
+    }
+}
+
+/* ---------- Search & render ---------- */
+
+function performSearch(rawQuery) {
+    const query = (rawQuery || '').trim();
+    if (!query) {
+        showMessage('Silakan masukkan nama siswa.', 'warning');
+        return;
+    }
+
+    const nameHeader = findHeaderKeyByCandidates(['NAMA','nama','name']);
+    const tanggalHeader = findHeaderKeyByCandidates(['Tanggal','tanggal','tgl','date']);
+    const statusHeader = findHeaderKeyByCandidates(['STATUS','status','kelas','class']);
+    // keluhan header candidates include several variants & ampersand forms
+    const keluhanHeader = findHeaderKeyByCandidates(['AMNESA&HASILPX','AMNESA & HASIL PX','AMNESAHASILPX','AMNESA','HASILPX','AMNESA & HASIL PX']);
+
+    // filter rows containing the query in name (case-insensitive)
+    const results = dataRiwayat.filter(r => {
+        const v = nameHeader ? (r[nameHeader] || '') : '';
+        return v.toLowerCase().includes(query.toLowerCase());
+    });
+
+    if (!results || results.length === 0) {
+        showMessage(`Siswa dengan nama "${escapeHtml(query)}" tidak ditemukan dalam riwayat.`, 'danger');
+        return;
+    }
+
+    // build html for results
+    const visitsHTML = results.map(r => {
+        const tanggal = tanggalHeader ? (r[tanggalHeader] || '-') : (r['Tanggal'] || '-');
+        const nama = nameHeader ? (r[nameHeader] || '-') : (r['NAMA'] || '-');
+        const kelas = statusHeader ? (r[statusHeader] || '-') : (r['STATUS'] || '-');
+        // keluhan is single column "AMNESA & HASIL PX"
+        let keluhan = keluhanHeader ? (r[keluhanHeader] || '') : '';
+        keluhan = (keluhan && keluhan.trim()) ? keluhan.trim() : '-';
+
+        return `
+            <li class="list-group-item">
+                <div><strong>Tanggal:</strong> ${escapeHtml(tanggal || '-')}</div>
+                <div><strong>Nama:</strong> ${escapeHtml(nama)}</div>
+                <div><strong>Kelas:</strong> ${escapeHtml(kelas || '-')}</div>
+                <div><strong>Keluhan:</strong> ${escapeHtml(keluhan)}</div>
+            </li>
+        `;
+    }).join('');
+
+    hasilDiv.innerHTML = `
+        <div class="mb-2">
+            <h5 class="mb-0">Ditemukan ${results.length} riwayat kunjungan</h5>
+        </div>
+        <ul class="list-group">
+            ${visitsHTML}
+        </ul>
+    `;
+    hasilDiv.style.display = 'block';
+    hasilDiv.scrollIntoView({behavior:'smooth', block:'center'});
+}
+
+/* ---------- Helpers ---------- */
+
+function showMessage(message, type = 'info') {
+    const colorClass = (type === 'danger') ? 'text-danger' : (type === 'warning') ? 'text-warning' : 'text-primary';
+    hasilDiv.innerHTML = `<p class="${colorClass} mb-0">${escapeHtml(message)}</p>`;
+    hasilDiv.style.display = 'block';
+}
+
+function escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+}
+</script>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

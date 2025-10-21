@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Dashboard UKS — Hari Ini</title>
+
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+
+  <style>
+    /* kecilkan table pada mobile */
+    .table-responsive { max-height: 520px; overflow:auto; }
+    .small-muted { font-size:0.9rem; color:#6c757d; }
+  </style>
+</head>
+<body>
+  <nav class="navbar navbar-expand-lg navbar-dark bg-primary shadow-sm">
+    <div class="container">
+      <a class="navbar-brand" href="index.html">DIGIDUKS</a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <div class="collapse navbar-collapse" id="navbarNav">
+        <ul class="navbar-nav ms-auto">
+          <li class="nav-item"><a class="nav-link active" href="index.html">Dashboard</a></li>
+          <li class="nav-item"><a class="nav-link" href="cari.html">Cari Siswa</a></li>
+          <li class="nav-item"><a class="nav-link" href="obat.html">Obat</a></li>
+        </ul>
+      </div>
+    </div>
+  </nav>
+
+  <div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <div>
+        <h2>Dashboard UKS Hari Ini</h2>
+        <div class="small-muted">Menampilkan hanya kunjungan dengan <strong>TANGGAL</strong> hari ini.</div>
+      </div>
+
+      <div class="d-flex gap-2 align-items-center">
+        <div id="statusPlaceholder" class="me-2"></div>
+        <!-- Refresh style option 2 (standar) -->
+        <button id="refreshBtn" class="btn btn-primary">🔄 Refresh Data</button>
+      </div>
+    </div>
+
+    <div id="alertArea"></div>
+
+    <div class="row">
+      <div class="col-md-4 mb-4">
+        <div class="card text-center text-white bg-danger w-100">
+          <div class="card-header">Siswa Sakit Hari Ini</div>
+          <div class="card-body">
+            <h1 id="jumlah-sakit" class="display-4 fw-bold">0</h1>
+            <p class="card-text">Siswa</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-md-8 mb-4">
+        <div class="card h-100">
+          <div class="card-header">Daftar Nama Siswa Sakit</div>
+          <div class="card-body">
+            <div class="table-responsive">
+              <table class="table table-striped table-sm">
+                <thead>
+                  <tr>
+                    <th>Timestamp</th>
+                    <th>Nama Siswa</th>
+                    <th>Kelas</th>
+                    <th>Jenis Kelamin</th>
+                    <th>Anamnesa & Hasil PK</th>
+                  </tr>
+                </thead>
+                <tbody id="tabel-sakit-body">
+                  <tr><td colspan="7" class="text-center">Memuat data...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+<!-- Tambahkan di dalam <div class="container mt-4">, setelah row tabel siswa -->
+<div class="row mt-4">
+  <div class="col-12">
+    <div class="card">
+      <div class="card-header bg-primary text-white">
+        Laporan Visual Looker Studio
+      </div>
+      <div class="card-body">
+        <div class="ratio ratio-16x9">
+          <iframe src="https://lookerstudio.google.com/embed/reporting/ddc2db19-9851-4ac7-a686-7a8ee529785e/page/page_12345"
+            style="border:0;" allowfullscreen
+            sandbox="allow-storage-access-by-user-activation allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox">
+          </iframe>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/*
+  index.html (final)
+  - Hanya menampilkan baris di CSV yang TANGGAL = hari ini (format dd/mm/yyyy, atau dd/mm/yyyy HH:MM:SS; mendukung campuran)
+  - Tidak mengubah spreadsheet
+  - Tombol Refresh untuk reload manual
+  - Auto reload pada pergantian hari (midnight) agar "reset" tampilannya
+  - Jika belum ada data hari ini -> tampil pesan simple: "Belum ada siswa yang berkunjung hari ini."
+*/
+
+const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQntlMIiLG9TMkWCtS_NVIR0aH87VSAY3dA5ydVS2cc3mnwwYKMTVtY6I8vE6AXy6RO6iAwzWDq7qpN/pub?gid=2076057568&single=true&output=csv';
+
+// DOM
+const tabelBody = document.getElementById('tabel-sakit-body');
+const jumlahSakitEl = document.getElementById('jumlah-sakit');
+const alertArea = document.getElementById('alertArea');
+const refreshBtn = document.getElementById('refreshBtn');
+const statusPlaceholder = document.getElementById('statusPlaceholder');
+
+let lastLoadedAt = null;
+let csvTextCache = null;
+
+document.addEventListener('DOMContentLoaded', () => {
+  refreshBtn.addEventListener('click', loadAndRender);
+  loadAndRender();
+  scheduleMidnightReload();
+});
+
+/* ---------- Utilities ---------- */
+
+function showAlert(message, type = 'info') {
+  alertArea.innerHTML = `<div class="alert alert-${type}">${escapeHtml(message)}</div>`;
+}
+
+function clearAlert() { alertArea.innerHTML = ''; }
+
+function setStatusHTML(html) { statusPlaceholder.innerHTML = html; }
+
+function escapeHtml(s){ if (s === null || s === undefined) return ''; return String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'); }
+
+/* Return today's date string in dd/mm/yyyy */
+function getTodayDDMMYYYY() {
+  const d = new Date();
+  const dd = String(d.getDate()).padStart(2,'0');
+  const mm = String(d.getMonth() + 1).padStart(2,'0');
+  const yyyy = d.getFullYear();
+  return `${dd}/${mm}/${yyyy}`;
+}
+
+/* Attempt to extract dd/mm/yyyy from a cell value.
+   Supports:
+   - "20/10/2025"
+   - "20/10/2025 08:35:22"
+   - "20-10-2025 08:35"  (will normalize dashes to slashes if matches)
+   - If no recognizable pattern -> returns null
+*/
+function extractDateDDMMYYYY(cell) {
+  if (!cell && cell !== 0) return null;
+  const s = String(cell).trim();
+  // regex to match dd/mm/yyyy or d/m/yyyy optionally with time, allow / or - as separator
+  const re = /(\b\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}\b)/;
+  const m = s.match(re);
+  if (!m) return null;
+  const raw = m[1];
+  // normalize separators to '/'
+  const normalized = raw.replace(/-/g, '/');
+  // ensure dd and mm are two digits
+  const parts = normalized.split('/');
+  if (parts.length !== 3) return null;
+  const dd = String(parts[0]).padStart(2,'0');
+  const mm = String(parts[1]).padStart(2,'0');
+  const yyyy = parts[2];
+  return `${dd}/${mm}/${yyyy}`;
+}
+
+/* ---------- CSV parse (robust, handles quoted fields) ---------- */
+
+function parseCSV(text) {
+  const rows = [];
+  let row = [];
+  let cur = '';
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (i + 1 < text.length && text[i+1] === '"') {
+          cur += '"'; i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        cur += ch;
+      }
+    } else {
+      if (ch === '"') {
+        inQuotes = true;
+      } else if (ch === ',') {
+        row.push(cur);
+        cur = '';
+      } else if (ch === '\r') {
+        // ignore
+      } else if (ch === '\n') {
+        row.push(cur);
+        rows.push(row);
+        row = [];
+        cur = '';
+      } else {
+        cur += ch;
+      }
+    }
+  }
+  // final
+  if (inQuotes || cur !== '' || row.length > 0) {
+    row.push(cur);
+    rows.push(row);
+  }
+  // trim possible trailing empty row
+  if (rows.length > 0 && rows[rows.length-1].length === 1 && rows[rows.length-1][0] === '') {
+    rows.pop();
+  }
+  return rows;
+}
+
+/* Find header key by candidates (case-insensitive, remove spaces/punctuation) */
+function normalize(h) {
+  if (h === null || h === undefined) return '';
+  return String(h).toLowerCase().replace(/\s+/g,'').replace(/[^a-z0-9]/g,'');
+}
+function findHeaderIndex(headers, candidates) {
+  const map = {};
+  headers.forEach((h, i) => map[normalize(h)] = i);
+  for (const c of candidates) {
+    const nc = normalize(c);
+    if (map[nc] !== undefined) return map[nc];
+  }
+  // partial contains
+  for (let i=0;i<headers.length;i++){
+    const nh = normalize(headers[i]);
+    for (const c of candidates) {
+      const nc = normalize(c);
+      if (nh.includes(nc) || nc.includes(nh)) return i;
+    }
+  }
+  return -1;
+}
+
+/* ---------- Main: load CSV, filter by today's date, render ---------- */
+
+async function loadAndRender() {
+  try {
+    setStatusHTML('<div class="small-muted">Memuat data...</div>');
+    clearAlert();
+    const resp = await fetch(CSV_URL, { cache: 'no-store' });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const text = await resp.text();
+    csvTextCache = text;
+    lastLoadedAt = new Date();
+
+    const rows = parseCSV(text);
+    if (!rows || rows.length < 1) {
+      renderEmpty();
+      setStatusHTML('');
+      return;
+    }
+
+    const headers = rows[0];
+    const bodyRows = rows.slice(1);
+
+    // detect columns
+    const idxTanggal = findHeaderIndex(headers, ['TANGGAL','timestamp','tanggal','date','tgl']);
+    const idxNama = findHeaderIndex(headers, ['nama','name','nama siswa','namasiswa']);
+    const idxKelas = findHeaderIndex(headers, ['kelas','status','class']);
+    const idxJK = findHeaderIndex(headers, ['jenis kelamin','jeniskelamin','jk','gender','jeniskelamin']);
+    const idxAmnesa = findHeaderIndex(headers, ['amnesa','anamnesa','amnesa & hasil px','anamnesa & hasil','amnesa&hasilpx','hasilpx','hasil pk','anamnesa & hasil pk']);
+    const idxTindakan = findHeaderIndex(headers, ['tindakan','action','treatment']);
+    const idxObat = findHeaderIndex(headers, ['obat','medicine','medication','drug']);
+
+    // --- cari tanggal paling baru di spreadsheet ---
+const allDates = bodyRows
+  .map(r => extractDateDDMMYYYY(r[idxTanggal]))
+  .filter(Boolean);
+
+if (allDates.length === 0) {
+  renderEmpty();
+  setStatusHTML('');
+  return;
+}
+
+// ambil tanggal paling akhir
+const latestDate = allDates.sort((a, b) => {
+  const [da, ma, ya] = a.split('/').map(Number);
+  const [db, mb, yb] = b.split('/').map(Number);
+  return new Date(ya, ma - 1, da) - new Date(yb, mb - 1, db);
+}).pop();
+
+// --- ambil hanya data dengan tanggal terbaru itu ---
+const matched = [];
+for (const r of bodyRows) {
+  const cellTanggal = (idxTanggal !== -1) ? (r[idxTanggal] || '') : '';
+  const extracted = extractDateDDMMYYYY(cellTanggal);
+  if (extracted === latestDate) {
+    matched.push({
+      raw: r,
+      tanggalCell: cellTanggal,
+      nama: idxNama !== -1 ? (r[idxNama] || '') : '',
+      kelas: idxKelas !== -1 ? (r[idxKelas] || '') : '',
+      jk: idxJK !== -1 ? (r[idxJK] || '') : '',
+      amnesa: idxAmnesa !== -1 ? (r[idxAmnesa] || '') : '',
+      tindakan: idxTindakan !== -1 ? (r[idxTindakan] || '') : '',
+      obat: idxObat !== -1 ? (r[idxObat] || '') : ''
+    });
+  }
+}
+
+    // render
+    renderRows(matched);
+    setStatusHTML(`<div class="small-muted">Terakhir dimuat: ${lastLoadedAt.toLocaleString()}</div>`);
+  } catch (err) {
+    console.error(err);
+    showAlert('Gagal memuat data: ' + err.message, 'danger');
+    tabelBody.innerHTML = `<tr><td colspan="7" class="text-center text-danger">Gagal memuat data.</td></tr>`;
+    jumlahSakitEl.textContent = '0';
+    setStatusHTML('');
+  }
+}
+
+function renderRows(arr) {
+  if (!arr || arr.length === 0) {
+    renderEmpty();
+    return;
+  }
+
+  // user requested: do NOT sort — keep order as in spreadsheet
+  const rowsHtml = arr.map(item => {
+  return `<tr>
+    <td>${escapeHtml(item.tanggalCell)}</td>
+    <td>${escapeHtml(item.nama)}</td>
+    <td>${escapeHtml(item.kelas)}</td>
+    <td>${escapeHtml(item.jk)}</td>
+    <td>${escapeHtml(item.amnesa)}</td>
+  </tr>`;
+}).join('');
+
+  tabelBody.innerHTML = rowsHtml;
+  jumlahSakitEl.textContent = String(arr.length);
+  clearAlert();
+}
+
+function renderEmpty() {
+  tabelBody.innerHTML = `<tr><td colspan="7" class="text-center">Belum ada siswa yang berkunjung hari ini.</td></tr>`;
+  jumlahSakitEl.textContent = '0';
+  clearAlert();
+}
+
+/* ---------- Auto reload at midnight (local) ---------- */
+
+function msUntilNextMidnight() {
+  const now = new Date();
+  const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  return tomorrow - now;
+}
+
+function scheduleMidnightReload() {
+  const ms = msUntilNextMidnight();
+  // schedule a reload at next midnight + re-schedule itself
+  setTimeout(() => {
+    loadAndRender();
+    scheduleMidnightReload();
+  }, ms + 1000); // extra second to be safe
+}
+
+/* ---------- Optional: keyboard shortcut R to refresh ---------- */
+document.addEventListener('keydown', (e) => {
+  if ((e.key === 'r' || e.key === 'R') && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    loadAndRender();
+  }
+});
+</script>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
