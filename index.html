@@ -103,14 +103,7 @@
 </div>
 
 <script>
-/*
-  index.html (final)
-  - Hanya menampilkan baris di CSV yang TANGGAL = hari ini (format dd/mm/yyyy, atau dd/mm/yyyy HH:MM:SS; mendukung campuran)
-  - Tidak mengubah spreadsheet
-  - Tombol Refresh untuk reload manual
-  - Auto reload pada pergantian hari (midnight) agar "reset" tampilannya
-  - Jika belum ada data hari ini -> tampil pesan simple: "Belum ada siswa yang berkunjung hari ini."
-*/
+
 
 const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQntlMIiLG9TMkWCtS_NVIR0aH87VSAY3dA5ydVS2cc3mnwwYKMTVtY6I8vE6AXy6RO6iAwzWDq7qpN/pub?gid=2076057568&single=true&output=csv';
 
@@ -151,13 +144,7 @@ function getTodayDDMMYYYY() {
   return `${dd}/${mm}/${yyyy}`;
 }
 
-/* Attempt to extract dd/mm/yyyy from a cell value.
-   Supports:
-   - "20/10/2025"
-   - "20/10/2025 08:35:22"
-   - "20-10-2025 08:35"  (will normalize dashes to slashes if matches)
-   - If no recognizable pattern -> returns null
-*/
+
 function extractDateDDMMYYYY(cell) {
   if (!cell && cell !== 0) return null;
   const s = String(cell).trim();
@@ -280,7 +267,7 @@ async function loadAndRender() {
     const idxTindakan = findHeaderIndex(headers, ['tindakan','action','treatment']);
     const idxObat = findHeaderIndex(headers, ['obat','medicine','medication','drug']);
 
-    // --- cari tanggal paling baru di spreadsheet ---
+    
 const allDates = bodyRows
   .map(r => extractDateDDMMYYYY(r[idxTanggal]))
   .filter(Boolean);
@@ -291,14 +278,14 @@ if (allDates.length === 0) {
   return;
 }
 
-// ambil tanggal paling akhir
+
 const latestDate = allDates.sort((a, b) => {
   const [da, ma, ya] = a.split('/').map(Number);
   const [db, mb, yb] = b.split('/').map(Number);
   return new Date(ya, ma - 1, da) - new Date(yb, mb - 1, db);
 }).pop();
 
-// --- ambil hanya data dengan tanggal terbaru itu ---
+
 const matched = [];
 for (const r of bodyRows) {
   const cellTanggal = (idxTanggal !== -1) ? (r[idxTanggal] || '') : '';
