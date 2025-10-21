@@ -68,13 +68,7 @@
     </main>
 
 <script>
-/*
-  File: cari.html (update)
-  - Keluhan diambil dari satu kolom: "AMNESA & HASIL PX" (header dicocokkan case-insensitive & normalized)
-  - Kelas diambil dari kolom: "STATUS"
-  - Jika keluhan kosong => tampil '-'
-  - Autosuggest model B, max 5
-*/
+
 
 const urlRiwayatUKS = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQntlMIiLG9TMkWCtS_NVIR0aH87VSAY3dA5ydVS2cc3mnwwYKMTVtY6I8vE6AXy6RO6iAwzWDq7qpN/pub?gid=2076057568&single=true&output=csv';
 
@@ -128,10 +122,7 @@ async function loadCSV() {
     }
 }
 
-/**
- * Parser CSV sederhana namun menangani kutipan ganda dan koma di dalam field.
- * Mengembalikan array of arrays.
- */
+
 function parseCSV(text) {
     const rows = [];
     let i = 0, len = text.length;
