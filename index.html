@@ -9,7 +9,6 @@
   <link rel="stylesheet" href="style.css">
 
   <style>
-    /* kecilkan table pada mobile */
     .table-responsive { max-height: 520px; overflow:auto; }
     .small-muted { font-size:0.9rem; color:#6c757d; }
   </style>
@@ -82,8 +81,7 @@
         </div>
       </div>
     </div>
-
-<!-- Tambahkan di dalam <div class="container mt-4">, setelah row tabel siswa -->
+    
 <div class="row mt-4">
   <div class="col-12">
     <div class="card">
@@ -123,7 +121,7 @@ document.addEventListener('DOMContentLoaded', () => {
   scheduleMidnightReload();
 });
 
-/* ---------- Utilities ---------- */
+
 
 function showAlert(message, type = 'info') {
   alertArea.innerHTML = `<div class="alert alert-${type}">${escapeHtml(message)}</div>`;
