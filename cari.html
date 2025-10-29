@@ -6,7 +6,7 @@
     <title>Cari Riwayat Siswa - DIGIDUKS</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        /* styling khusus untuk autosuggest */
+        
         .suggestions {
             position: absolute;
             z-index: 2000;
@@ -22,7 +22,7 @@
         .suggestion-item:hover, .suggestion-item.active {
             background-color: #e9f5ff;
         }
-        /* space inside card to not overlap suggestions */
+    
         .search-wrapper { position: relative; }
     </style>
 </head>
@@ -181,14 +181,11 @@ function parseCSV(text) {
 
 function normalizeHeader(h) {
     if (!h) return '';
-    // lowercase and remove non-alphanumeric characters
+    
     return h.toString().toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
-/**
- * Find actual header name from CSV headers that matches any of candidates (case-insensitive, normalize).
- * Returns the original header string (exact as in CSV) or null.
- */
+
 function findHeaderKeyByCandidates(candidates = []) {
     if (!headers || headers.length === 0) return null;
     const normToOriginal = {};
@@ -199,7 +196,7 @@ function findHeaderKeyByCandidates(candidates = []) {
         const norm = normalizeHeader(cand);
         if (normToOriginal[norm]) return normToOriginal[norm];
     }
-    // fallback: try to match partial names (e.g., header contains 'amnesa' or 'hasilpx')
+    
     for (const h of headers) {
         const nh = normalizeHeader(h);
         for (const cand of candidates) {
@@ -335,7 +332,7 @@ function performSearch(rawQuery) {
     // keluhan header candidates include several variants & ampersand forms
     const keluhanHeader = findHeaderKeyByCandidates(['AMNESA&HASILPX','AMNESA & HASIL PX','AMNESAHASILPX','AMNESA','HASILPX','AMNESA & HASIL PX']);
 
-    // filter rows containing the query in name (case-insensitive)
+    
     const results = dataRiwayat.filter(r => {
         const v = nameHeader ? (r[nameHeader] || '') : '';
         return v.toLowerCase().includes(query.toLowerCase());
